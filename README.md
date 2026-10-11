@@ -1,6 +1,6 @@
-# OBI ESP32 - Open Battery Information
+# OBI Firmware - Open Battery Information
 
-An ESP32-C3 port of the [Open Battery Information](https://github.com/mnh-jansson/open-battery-information) project by Martin Jansson.
+Firmware for ESP32-C3 and Wemos D1 mini (ESP8266), based on the [Open Battery Information](https://github.com/mnh-jansson/open-battery-information) project by Martin Jansson.
 
 This firmware provides a web-based interface for reading Makita LXT battery information, including cell voltages, temperatures, charge cycles, and error codes.
 
@@ -10,7 +10,7 @@ This firmware provides a web-based interface for reading Makita LXT battery info
 
 - **Web Interface**: Responsive single-page application accessible from any browser
 - **Real-time Battery Data**: Cell voltages, pack voltage, temperatures, charge count
-- **mDNS Discovery**: Access via `http://obi-esp32.local`
+- **Standalone Wi-Fi**: The device creates its own `OpenBatteryInfo` access point
 - **OTA Updates**: Wireless firmware updates after initial flash
 - **REST API**: JSON endpoints for integration with other systems
 - **Dual Temperature Sensors**: Cell thermistor and MOSFET temperatures
@@ -21,7 +21,7 @@ This firmware provides a web-based interface for reading Makita LXT battery info
 
 | Component | Quantity | Notes |
 |-----------|----------|-------|
-| ESP32-C3 Super Mini | 1 | Any ESP32-C3 board with native USB should work |
+| ESP32-C3 Super Mini or Wemos D1 mini | 1 | Both PlatformIO targets are supported |
 | 4.7kΩ Resistor | 2 | Pull-up resistors for data lines |
 | Makita LXT Battery | 1 | 18V batteries (BL18xx series) |
 | Connecting wires | 4 | For battery connections |
@@ -29,12 +29,12 @@ This firmware provides a web-based interface for reading Makita LXT battery info
  
 ### Enclosure
 
-A 3D printed enclosure designed for the original Arduino-based OBI works well with this ESP32 version:
+A 3D printed enclosure designed for the original Arduino-based OBI works with these compact boards:
 
 - **Enclosure**: [Makita 18V Battery Unlock Device (OBI)](https://makerworld.com/en/models/2087559-makita-18v-battery-unlock-device-obi#profileId-2256293) on MakerWorld
 - **ESP32 Wedge**: [ESP32-C3 Super Mini holder](https://cad.onshape.com/documents/c5aa6404e5114fbe73d30d6f/w/0a86b12236fd063c60bf388b/e/192fc2f6005dd903a32d98f6) - small wedge to secure the ESP32 in place
 
-The enclosure was designed for the Arduino Nano but accommodates the ESP32-C3 Super Mini with the addition of the wedge adapter.
+The enclosure was designed for the Arduino Nano; the ESP32-C3 Super Mini accommodates with the wedge adapter. Check board fit before closing the enclosure when using a Wemos D1 mini.
 
 ![OBI attached to battery](docs/photo1.jpg)
 
@@ -59,16 +59,20 @@ If the link to the Makita charger connector doesn't work, try searching for some
 
 #### Pin Connections
 
-| ESP32-C3 Pin | Makita Battery | Description |
-|--------------|----------------|-------------|
-| GPIO3 | Pin 2 (Data) | OneWire data line |
-| GPIO4 | Pin 6 (Enable) | Enable signal |
-| GND | Pin 5 (B-) | Ground reference |
-| 3.3V | — | Power for pull-up resistors only |
+| Board | Board Pin | Makita Battery | Description |
+|-------|-----------|----------------|-------------|
+| ESP32-C3 | GPIO3 | Pin 2 (Data) | OneWire data line |
+| Wemos D1 mini | D1 / GPIO5 | Pin 2 (Data) | OneWire data line |
+| ESP32-C3 | GPIO4 | Pin 6 (Enable) | Enable signal |
+| Wemos D1 mini | D2 / GPIO4 | Pin 6 (Enable) | Enable signal |
+| Both | GND | Pin 5 (B-) | Ground reference |
+| Both | 3.3V | — | Power for pull-up resistors only |
+
+On the Wemos D1 mini, connect to the board labels D1 and D2; the firmware configures their GPIO numbers as 5 and 4 respectively.
 
 #### Pull-up Resistors
 
-Both GPIO3 and GPIO4 require 4.7kΩ pull-up resistors to 3.3V. These are essential for the modified OneWire protocol to function correctly.
+Both data and enable lines require 4.7kΩ pull-up resistors to 3.3V. These are essential for the modified OneWire protocol to function correctly.
 
 #### Makita Battery Terminal Layout
 
@@ -86,7 +90,7 @@ Looking at the battery terminals from the front:
 - **Pin 6 (EN)**: Enable signal (side terminal)
 - **Outside pin (B-)**: Ground/negative terminal
 
-⚠️ **Warning**: Never connect the ESP32 directly to B+. The 18V will destroy the ESP32.
+⚠️ **Warning**: Never connect either board directly to B+. The 18V will destroy it.
 
 ## Building and Flashing
 
@@ -95,27 +99,22 @@ Looking at the battery terminals from the front:
 - [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
 - USB-C cable
 
-### Configuration
+### Wi-Fi Access Point
 
-Copy the secrets template and add your WiFi credentials:
+The firmware does not join an existing Wi-Fi network and does not need your home Wi-Fi credentials. Connect to the device's access point:
 
-```bash
-cp src/secrets.h.example src/secrets.h
-```
+- **SSID**: `OpenBatteryInfo`
+- **Password**: `12345678`
 
-Then edit `src/secrets.h` with your WiFi credentials:
-
-```cpp
-#define WIFI_SSID "YourSSID"
-#define WIFI_PASS "YourPassword"
-```
-
-The `secrets.h` file is gitignored, so your credentials won't be committed to version control.
+After connecting, the captive portal should open automatically. If your device does not show the portal, keep it connected to `OpenBatteryInfo` and visit `http://192.168.4.1`.
 
 ### Initial Flash (USB)
 
 ```bash
-# Build and upload via USB
+# Build and upload a Wemos D1 mini via USB
+pio run -e wemos_d1_mini_web -t upload
+
+# Or build and upload the ESP32-C3
 pio run -e esp32c3_web -t upload
 
 # Monitor serial output
@@ -127,7 +126,10 @@ pio device monitor
 After the initial flash, you can update wirelessly:
 
 ```bash
-# Upload via OTA (update IP in platformio.ini if needed)
+# Upload a Wemos D1 mini via OTA (update IP in platformio.ini if needed)
+pio run -e wemos_d1_mini_ota -t upload
+
+# ESP32-C3 OTA target
 pio run -e esp32c3_ota -t upload
 ```
 
@@ -143,10 +145,7 @@ sudo firewall-cmd --runtime-to-permanent
 
 ### Finding the Device
 
-The ESP32 advertises itself via mDNS. After connecting to WiFi, access:
-
-- **mDNS**: `http://obi-esp32.local`
-- **Direct IP**: Check serial output for assigned IP address
+Connect your phone or computer to the `OpenBatteryInfo` access point. The captive portal should open automatically; otherwise browse to `http://192.168.4.1`.
 
 ### Web Interface
 

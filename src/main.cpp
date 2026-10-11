@@ -1,16 +1,15 @@
 /**
- * Open Battery Information - ESP32-C3 Firmware
+ * Open Battery Information - ESP32-C3 / ESP8266 Firmware
  *
  * FUNCTIONAL REQUIREMENTS:
  * 1. Serial bridge mode: Communicate with PC via USB serial using OBI protocol
  * 2. Web server mode: Browser-based interface for standalone diagnostics
  * 3. Support Makita LXT 18V battery protocol via modified OneWire
- * 4. WiFi configuration via captive portal on first boot
+ * 4. Provide a fixed standalone Wi-Fi access point in web server mode
  *
  * HARDWARE CONFIGURATION:
- * - ESP32-C3 Super Mini
- * - GPIO3: OneWire data line (4.7kΩ pull-up to 3.3V)
- * - GPIO4: Enable pin (4.7kΩ pull-up to 3.3V)
+ * - ESP32-C3 or Wemos D1 mini (ESP8266)
+ * - OneWire data and enable pins are selected by the PlatformIO environment
  * - Battery Pin 2: OneWire data
  * - Battery Pin 6: Enable (must be HIGH during communication)
  *
@@ -29,14 +28,19 @@
 #include "OneWire2.h"
 
 #ifdef ENABLE_WEB_SERVER
+#if defined(ARDUINO_ARCH_ESP8266)
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+using OBIWebServer = ESP8266WebServer;
+#else
 #include <WiFi.h>
 #include <WebServer.h>
+using OBIWebServer = WebServer;
+#endif
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
+#include <DNSServer.h>
 #include "web_interface.h"
-#if __has_include("secrets.h")
-#include "secrets.h"
-#endif
 #endif
 
 // Version
@@ -53,14 +57,9 @@
 #define ENABLE_PIN 4
 #endif
 
-// WiFi credentials (for web server mode)
-#ifndef WIFI_SSID
-#define WIFI_SSID "YourSSID"
-#endif
-
-#ifndef WIFI_PASS
-#define WIFI_PASS "YourPassword"
-#endif
+// Fixed access point credentials for web server mode.
+static const char *AP_SSID = "OpenBatteryInfo";
+static const char *AP_PASS = "12345678";
 
 // Nibble swap helper
 #define SWAP_NIBBLES(x) (((x) & 0x0F) << 4 | ((x) & 0xF0) >> 4)
@@ -69,7 +68,8 @@
 OneWire<ONEWIRE_PIN> makita;
 
 #ifdef ENABLE_WEB_SERVER
-WebServer server(80);
+OBIWebServer server(80);
+DNSServer dnsServer;
 #endif
 
 // Battery data structure
@@ -126,7 +126,7 @@ void setup() {
     memset(&batteryData, 0, sizeof(batteryData));
 
     Serial.println("=================================");
-    Serial.println("OBI ESP32-C3 - Open Battery Info");
+    Serial.println("OBI - Open Battery Info");
     Serial.println("=================================");
     Serial.printf("Version: %d.%d.%d\n", OBI_VERSION_MAJOR, OBI_VERSION_MINOR, OBI_VERSION_PATCH);
     Serial.printf("OneWire Pin: GPIO%d\n", ONEWIRE_PIN);
@@ -134,26 +134,24 @@ void setup() {
 
 #ifdef ENABLE_WEB_SERVER
     Serial.println("Mode: Web Server + Serial Bridge");
-    Serial.println("Connecting to WiFi...");
+    Serial.println("Starting WiFi access point...");
+#if defined(ARDUINO_ARCH_ESP32)
+    setCpuFrequencyMhz(80);
+#endif
+    WiFi.mode(WIFI_AP);
+#if defined(ARDUINO_ARCH_ESP32)
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+#endif
 
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println();
-        Serial.print("Connected! IP: ");
-        Serial.println(WiFi.localIP());
+    if (WiFi.softAP(AP_SSID, AP_PASS, 1, false, 1)) {
+        Serial.print("Access point: ");
+        Serial.println(AP_SSID);
+        Serial.print("Open http://");
+        Serial.println(WiFi.softAPIP());
         setupOTA();
         setupWebServer();
     } else {
-        Serial.println();
-        Serial.println("WiFi failed - Serial bridge only");
+        Serial.println("Failed to start access point");
     }
 #else
     Serial.println("Mode: Serial Bridge Only");
@@ -167,6 +165,7 @@ void setup() {
 // ------------------------------------------------------------------
 void loop() {
 #ifdef ENABLE_WEB_SERVER
+    dnsServer.processNextRequest();
     ArduinoOTA.handle();
     server.handleClient();
 #endif
@@ -521,7 +520,7 @@ void processSerialCommand() {
 
 #ifdef ENABLE_WEB_SERVER
 void setupOTA() {
-    ArduinoOTA.setHostname("obi-esp32");
+    ArduinoOTA.setHostname("obi-battery-info");
 
     ArduinoOTA.onStart([]() {
         String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
@@ -557,6 +556,11 @@ void setupOTA() {
 #ifdef ENABLE_WEB_SERVER
 void handleRoot() {
     server.send_P(200, "text/html", INDEX_HTML);
+}
+
+void redirectToPortal() {
+    server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+    server.send(302, "text/plain", "");
 }
 
 void handleApiRead() {
@@ -647,12 +651,21 @@ void handleApiReset() {
 
 void setupWebServer() {
     server.on("/", HTTP_GET, handleRoot);
+    server.on("/generate_204", HTTP_GET, redirectToPortal);
+    server.on("/gen_204", HTTP_GET, redirectToPortal);
+    server.on("/hotspot-detect.html", HTTP_GET, redirectToPortal);
+    server.on("/library/test/success.html", HTTP_GET, redirectToPortal);
+    server.on("/connecttest.txt", HTTP_GET, redirectToPortal);
+    server.on("/ncsi.txt", HTTP_GET, redirectToPortal);
+    server.on("/fwlink", HTTP_GET, redirectToPortal);
     server.on("/api/read", HTTP_GET, handleApiRead);
     server.on("/api/voltages", HTTP_GET, handleApiVoltages);
     server.on("/api/leds", HTTP_GET, handleApiLeds);
     server.on("/api/reset", HTTP_GET, handleApiReset);
+    server.onNotFound(redirectToPortal);
 
+    dnsServer.start(53, "*", WiFi.softAPIP());
     server.begin();
-    Serial.println("Web server started on port 80");
+    Serial.println("Captive portal DNS and web server started");
 }
 #endif

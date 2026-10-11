@@ -1,5 +1,5 @@
 /**
- * Embedded Web Interface for OBI ESP32
+ * Embedded Web Interface for OBI
  *
  * FUNCTIONAL REQUIREMENTS:
  * 1. Serve single-page web application for battery diagnostics
@@ -225,7 +225,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
         <div class="card">
             <h2>Debug Log</h2>
-            <div class="debug" id="debugLog">OBI ESP32 Web Interface Ready\n</div>
+            <div class="debug" id="debugLog">OBI Web Interface Ready\n</div>
         </div>
     </div>
 
